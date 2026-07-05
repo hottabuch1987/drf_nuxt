@@ -1,0 +1,54 @@
+📡 Доступные эндпоинты
+Метод	URL	Описание
+GET	/films/	Список фильмов (с пагинацией)
+GET	/films/{id}/	Детальная информация о фильме
+GET	/sessions/	Список сеансов (можно фильтровать по film, hall, дате)
+GET	/sessions/{id}/	Детальная информация о сеансе
+GET	/sessions/{session_id}/booking_seats/	Список занятых мест на конкретный сеанс
+GET	/seats/	Все места (обычно не нужно, лучше через booking_seats)
+POST	/bookings/create_booking/	Создание бронирования с выбранными местами
+GET	/bookings/	Список бронирований текущего пользователя
+GET	/bookings/{id}/	Детали брони
+GET	/tickets/	Список билетов пользователя
+
+def get_queryset(self):
+        """
+        Оптимизация запросов для бронирований
+        """
+        user = self.request.user
+        queryset = super().get_queryset()
+
+        # Фильтрация по пользователю для обычных пользователей
+        if user.is_authenticated and not user.is_staff:
+            queryset = queryset.filter(user=user)
+
+        # Оптимизация запросов
+        queryset = queryset.select_related(
+            'user', 'session', 'session__film', 'session__hall'
+        ).prefetch_related(
+            Prefetch(
+                'tickets',
+                queryset=Ticket.objects.select_related(
+                    'seat'
+                ).only(
+                    'id', 'booking', 'session', 'seat', 'price',
+                    'seat__row', 'seat__number', 'seat__seat_type'
+                )
+            )
+        ).annotate(
+            tickets_count=Count('tickets'),
+            total_price=Sum('tickets__price')
+        )
+
+        if self.action == 'list':
+            # Для списка используем только необходимые поля
+            return queryset.only(
+                'id', 'booking_code', 'user', 'session', 'status',
+                'created_at', 'updated_at',
+                'user__id', 'user__email',
+                'session__id', 'session__start_time', 'session__price',
+                'session__film__id', 'session__film__title',
+                'session__hall__id', 'session__hall__name'
+            )
+        
+        return queryset
